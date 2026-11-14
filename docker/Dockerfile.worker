@@ -1,0 +1,18 @@
+# WARNING: Docker daemon access is a root-equivalent trust boundary.
+# On production use an isolated runner host and a rootless daemon/socket.
+FROM python:3.12-slim
+ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 PIP_NO_CACHE_DIR=1
+WORKDIR /service
+# Only the Docker CLI is needed (the daemon lives on the runner host). Newer Debian ships it as
+# docker-cli; older releases bundle it in docker.io. Fail the build if the CLI is still missing.
+RUN apt-get update \
+    && (apt-get install -y --no-install-recommends docker-cli \
+        || apt-get install -y --no-install-recommends docker.io) \
+    && rm -rf /var/lib/apt/lists/* \
+    && docker --version
+COPY pyproject.toml ./
+COPY app ./app
+COPY alembic ./alembic
+COPY alembic.ini ./alembic.ini
+RUN pip install --no-cache-dir .
+CMD ["celery", "-A", "app.queue.celery_app", "worker", "--loglevel=INFO", "--queues=investigations", "--concurrency=2"]

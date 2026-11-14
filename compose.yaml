@@ -1,0 +1,112 @@
+name: ai-code-testing-agent
+
+x-env: &shared-env
+  API_KEY: ${API_KEY:?Set API_KEY in .env}
+  DATABASE_URL: postgresql+psycopg://agent:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}@postgres:5432/agent
+  REDIS_URL: redis://:${REDIS_PASSWORD:?Set REDIS_PASSWORD}@redis:6379/0
+  DATA_DIR: ${HOST_DATA_DIR:?Export absolute HOST_DATA_DIR}
+  RUNNER_IMAGE: ${RUNNER_IMAGE:-ai-test-runner:local}
+  OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4-mini}
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: agent
+      POSTGRES_USER: agent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U agent -d agent"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  redis:
+    image: redis:7.4-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=$$REDIS_PASSWORD redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    restart: unless-stopped
+
+  migrate:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    environment: *shared-env
+    command: ["alembic", "upgrade", "head"]
+    depends_on:
+      postgres: {condition: service_healthy}
+    restart: "no"
+
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    environment: *shared-env
+    user: "10001:10001"
+    volumes:
+      - ${HOST_DATA_DIR:?Export HOST_DATA_DIR}:${HOST_DATA_DIR:?Export HOST_DATA_DIR}
+    ports:
+      - "127.0.0.1:8000:8000"
+    read_only: true
+    tmpfs: ["/tmp:mode=1777,size=64m"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    restart: unless-stopped
+
+  worker:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    environment:
+      <<: *shared-env
+      # Set OPENAI_API_KEY for OpenAI, or LLM_BASE_URL for a local model (then the key may stay empty).
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-}
+      OPENAI_CALL_TIMEOUT_SECONDS: ${OPENAI_CALL_TIMEOUT_SECONDS:-60}
+      INVESTIGATION_TIMEOUT_SECONDS: ${INVESTIGATION_TIMEOUT_SECONDS:-300}
+      DOCKER_HOST: ${DOCKER_HOST:-unix:///var/run/docker.sock}
+    volumes:
+      - ${HOST_DATA_DIR:?Export HOST_DATA_DIR}:${HOST_DATA_DIR:?Export HOST_DATA_DIR}
+    read_only: true
+    tmpfs: ["/tmp:mode=1777,size=128m"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    restart: unless-stopped
+
+  beat:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.worker
+    environment: *shared-env
+    command: ["celery", "-A", "app.queue.celery_app", "beat", "--loglevel=INFO", "--schedule=/tmp/celerybeat-schedule"]
+    volumes:
+      - ${HOST_DATA_DIR:?Export HOST_DATA_DIR}:${HOST_DATA_DIR:?Export HOST_DATA_DIR}
+    read_only: true
+    tmpfs: ["/tmp:mode=1777,size=64m"]
+    security_opt: ["no-new-privileges:true"]
+    cap_drop: ["ALL"]
+    depends_on:
+      migrate: {condition: service_completed_successfully}
+      redis: {condition: service_healthy}
+    restart: unless-stopped
+
+volumes:
+  pgdata:
+  redisdata:
