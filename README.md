@@ -89,7 +89,7 @@ curl -fsS -H "Authorization: Bearer $TOKEN" \
   http://127.0.0.1:8000/v1/investigations/JOB_ID/report.md
 ```
 
-Other endpoints: `GET /v1/projects/{id}`, `GET /v1/investigations?project_id={id}&status={status}&limit=50`, `POST /v1/investigations/{id}/cancel`, `GET /v1/diagnostics`; `GET /health/live`, `GET /health/ready`. OpenAPI docs: `/docs` (protect with proxy when exposed).
+Other endpoints: `GET /v1/projects/{id}`, `GET /v1/investigations?project_id={id}&status={status}&limit=50`, `POST /v1/investigations/{id}/cancel`, `GET /v1/diagnostics`; `GET /health/live`, `GET /health/ready`. OpenAPI docs at `/docs` and `/openapi.json` are **off by default**; set `ENABLE_DOCS=true` only for local development.
 
 ## How an investigation proceeds
 
@@ -117,11 +117,32 @@ Other endpoints: `GET /v1/projects/{id}`, `GET /v1/investigations?project_id={id
 | `DOCKER_MEMORY_MB` / `DOCKER_CPUS` / `DOCKER_PIDS_LIMIT` | 256 / 1.0 / 64 |
 | `DOCKER_LOG_BYTES` | 40,000 |
 | `REPORT_RETENTION_DAYS` | 30 |
+| `RATE_LIMIT_PER_MINUTE` (per client, `/v1/` routes, 0 disables) | 60 |
+| `ENABLE_DOCS` | false |
+
+### Rate limiting
+
+Every `/v1/` request is counted per client IP in a one-minute window stored in Redis, **before** the bearer token is checked, so failed token guesses are throttled too. Over the limit the API returns `429` with a `Retry-After` header; health checks are never throttled. If Redis is unreachable the limiter lets requests through and logs a warning. Behind a reverse proxy, the client IP is the proxy's unless uvicorn trusts the proxy's `X-Forwarded-For` header: change `--forwarded-allow-ips` in `docker/Dockerfile.api` to the proxy's address, otherwise all clients share one limit. Keep proxy-level throttling as well.
+
+## Updating pinned dependencies
+
+Base images are pinned by multi-architecture digest in the three Dockerfiles and `compose.yaml`, and Python packages are installed from hash-verified lock files (`requirements.lock` for the API and worker, `requirements-dev.lock` for CI, `docker/runner-requirements.lock` for the test runner). Nothing updates by itself, so refresh them regularly to pick up security fixes:
+
+```bash
+# Python packages (regenerate after editing pyproject.toml or docker/runner-requirements.in)
+uv pip compile pyproject.toml --universal --python-version 3.12 --generate-hashes -o requirements.lock
+uv pip compile pyproject.toml --extra dev --universal --python-version 3.12 --generate-hashes -o requirements-dev.lock
+uv pip compile docker/runner-requirements.in --universal --python-version 3.12 --generate-hashes -o docker/runner-requirements.lock
+
+# Base images: pull the tag, read its digest, and paste it after the tag (image:tag@sha256:...)
+docker pull python:3.12-slim && docker inspect --format '{{index .RepoDigests 0}}' python:3.12-slim
+```
 
 ## Testing
 
 ```bash
-python -m pip install -e '.[dev]'
+python -m pip install --require-hashes -r requirements-dev.lock
+python -m pip install --no-deps -e .
 export API_KEY='replace_this_with_40_or_more_random_characters'
 pytest -q
 ruff check app tests
@@ -134,7 +155,7 @@ The test suite uses fake OpenAI responses and a stubbed Docker runner, so it **d
 - [ ] Deploy **API + worker + Docker runner** in segregated security domains, preferably a dedicated runner VM/host with rootless Docker; restrict any Docker API/socket to that host. The `compose.dev.yaml` socket mount is **only** for a disposable local dev environment.
 - [ ] Put API behind HTTPS, request-body limit (e.g., 10 MB), authentication-aware throttling, logging, WAF and a private ingress; do not expose `/docs` or PostgreSQL/Redis publicly.
 - [ ] Rotate API, DB, Redis and OpenAI secrets in a secrets manager; ensure source projects do not include credentials. Worker alone receives `OPENAI_API_KEY`.
-- [ ] Pin and scan all base images by immutable digest and dependency locks before deployment; do not let uploads install Python packages. Maintain separate reviewed runner images for projects requiring known dependencies.
+- [ ] Scan the digest-pinned base images and locked dependencies before deployment, and refresh the pins regularly (see above); do not let uploads install Python packages. Maintain separate reviewed runner images for projects requiring known dependencies.
 - [ ] Mount a daemon-visible shared filesystem at the same absolute path for worker and runner Docker daemon; ensure separate directory ownership/permissions. Network-filesystem security and Docker socket configuration require environment-specific validation.
 - [ ] Run `alembic upgrade head` before releasing new API/worker images, maintain PostgreSQL backup + restore drills, Redis AOF persistence, one Celery beat, and dashboards for queue depth/failed jobs/runner error rates.
 - [ ] Route Docker containers through additional defense-in-depth as available: default seccomp/AppArmor (never disable them), user namespaces/rootless engine, and dedicated execution hosts. Container isolation is not the same as a hardened VM boundary.

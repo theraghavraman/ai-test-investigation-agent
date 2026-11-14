@@ -7,10 +7,12 @@ x-env: &shared-env
   DATA_DIR: ${HOST_DATA_DIR:?Export absolute HOST_DATA_DIR}
   RUNNER_IMAGE: ${RUNNER_IMAGE:-ai-test-runner:local}
   OPENAI_MODEL: ${OPENAI_MODEL:-gpt-5.4-mini}
+  ENABLE_DOCS: ${ENABLE_DOCS:-false}
+  RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-60}
 
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:f377d590e5474681d4d7838635031a2b50647923b7abfa803ce9b5ff35d5c663
     environment:
       POSTGRES_DB: agent
       POSTGRES_USER: agent
@@ -25,7 +27,7 @@ services:
     restart: unless-stopped
 
   redis:
-    image: redis:7.4-alpine
+    image: redis:7.4-alpine@sha256:7f7d30b7fdd09467bac58198a1f166dd69789d348d4fe859cccb20e0cf287fbe
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:?Set REDIS_PASSWORD}
     command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]

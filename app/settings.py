@@ -22,6 +22,10 @@ class Settings(BaseSettings):
     data_dir: Path = Path("/srv/agent-data")
     runner_image: str = "ai-test-runner:local"
     docker_binary: str = "docker"
+    # Serve /docs and /openapi.json. Keep off anywhere the API is reachable by others.
+    enable_docs: bool = False
+    # Requests per client per minute on /v1/ routes, counted before authentication. 0 disables.
+    rate_limit_per_minute: int = Field(default=60, ge=0, le=100_000)
 
     max_archive_bytes: int = Field(default=8_000_000, ge=1000, le=50_000_000)
     max_extracted_bytes: int = Field(default=1_000_000, ge=1000, le=10_000_000)

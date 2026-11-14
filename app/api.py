@@ -14,17 +14,23 @@ from sqlalchemy.orm import Session
 from app.auth import require_api_key
 from app.db import Investigation, Project, db_session, utcnow
 from app.queue import dispatch_job
+from app.ratelimit import rate_limit
 from app.reports import build_report, render_markdown
 from app.schemas import InvestigationCreate, InvestigationView, ProjectView
 from app.settings import Settings, get_settings
 from app.storage import ArchiveError, extract_approved
 
 log = logging.getLogger(__name__)
+# Interactive docs and the OpenAPI schema reveal every endpoint; they are off unless ENABLE_DOCS=true.
+_docs = get_settings().enable_docs
 app = FastAPI(
     title="AI Code Testing & Bug Investigation Agent",
     version="1.0.0",
     description="Approved-file test generation, bounded Docker pytest, and evidence-separated reports",
-    docs_url="/docs", redoc_url=None, openapi_url="/openapi.json",
+    docs_url="/docs" if _docs else None, redoc_url=None,
+    openapi_url="/openapi.json" if _docs else None,
+    # App-level dependencies run before each route's own, so throttling happens before authentication.
+    dependencies=[Depends(rate_limit)],
 )
 
 
