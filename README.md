@@ -165,3 +165,7 @@ The test suite uses fake OpenAI responses and a stubbed Docker runner, so it **d
 ## Limitations and scope
 
 This service investigates **only code that is approved and present in the snapshot**. It does not perform dependency resolution, arbitrary code checkout, live service integration, coverage-guided fuzzing, mutation testing or claim mathematical verification. Tests needing third-party libraries need a **prebuilt reviewed runner image** with those dependencies, configured by an administrator (never by a model). Many findings are hypotheses, not confirmed defects. Worker cancellation is cooperative between tool/API calls; an ongoing Docker subprocess is terminated by the per-run wall-time limit.
+
+## License
+
+[MIT](LICENSE)
