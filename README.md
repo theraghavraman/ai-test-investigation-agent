@@ -1,5 +1,7 @@
 # AI Code Testing & Bug Investigation Agent
 
+[![Tests](https://github.com/theraghavraman/ai-test-investigation-agent/actions/workflows/ci.yml/badge.svg)](https://github.com/theraghavraman/ai-test-investigation-agent/actions/workflows/ci.yml)
+
 Production-oriented **single-tenant** Python/FastAPI service for reviewing explicitly approved source/specification files, generating Pytest tests with the **OpenAI Responses API**, and executing those tests inside resource-limited Docker containers. The system stores immutable source snapshots, append-only generated tests and audit events, and separate **test observations** vs. **model hypotheses** in JSON and Markdown reports.
 
 ## Architecture
